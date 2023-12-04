@@ -71,17 +71,23 @@
 
 #ifdef USE_IMU
 
-  #include "I2Cdev.h"
+  // #include "I2Cdev.h"
 
-  #include "MPU6050_6Axis_MotionApps20.h"
+  // #include "MPU6050_6Axis_MotionApps20.h"
 
   #include "Wire.h"
 
-  #define INTERRUPT_PIN 2  // use pin 2 on Arduino Uno & most boards
+  #include "math.h"
 
-  #define MPU 0x68
+  #include "imu.h"
+
+  // #define INTERRUPT_PIN 2  // use pin 2 on Arduino Uno & most boards
+
+  // #define MPU 0x68
 
 #endif 
+
+#include "imu.h"
 
 //#define USE_SERVOS  // Enable use of PWM servos as defined in servos.h
 #undef USE_SERVOS     // Disable use of PWM servos
@@ -135,31 +141,31 @@
   long lastMotorCommand = AUTO_STOP_INTERVAL;
 #endif
 
-#ifdef USE_IMU
+// #ifdef USE_IMU
 
-  float AccX, AccY, AccZ;
+//   float AccX, AccY, AccZ;
 
-  float GyroX, GyroY, GyroZ;
+//   float GyroX, GyroY, GyroZ;
 
-  MPU6050 mpu;
+//   MPU6050 mpu;
 
-  bool dmpReady = false;  // set true if DMP init was successful
+//   bool dmpReady = false;  // set true if DMP init was successful
 
-  uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
+//   uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
 
-  uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
+//   uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
 
-  uint8_t fifoBuffer[64]; // FIFO storage buffer
+//   uint8_t fifoBuffer[64]; // FIFO storage buffer
 
-  Quaternion q;           // [w, x, y, z]         quaternion container
+//   Quaternion q;           // [w, x, y, z]         quaternion container
 
-  volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
+//   volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
   
-  void dmpDataReady() {
-      mpuInterrupt = true;
-  }
+//   void dmpDataReady() {
+//       mpuInterrupt = true;
+//   }
 
-#endif
+// #endif
 
 /* Variable initialization */
 
@@ -242,29 +248,23 @@ int runCommand() {
 
   case IMU_READ:
 
-    //return quaternions
-    Serial.print(q.w);
+    Serial.print(system_pitch);
     Serial.print(" ");
-    Serial.print(q.x);
+    Serial.print(system_roll);
     Serial.print(" ");
-    Serial.print(q.y);
+    Serial.print(0.0);
     Serial.print(" ");
-    Serial.print(q.z);
-    Serial.print(" ");
-    // then acc
     Serial.print(AccX);
     Serial.print(" ");
     Serial.print(AccY);
     Serial.print(" ");
     Serial.print(AccZ);
     Serial.print(" ");
-    //then rotation
     Serial.print(GyroX);
     Serial.print(" ");
     Serial.print(GyroY);
     Serial.print(" ");
     Serial.println(GyroZ);
-
     break;
 
 #endif USE_IMU
@@ -352,46 +352,7 @@ void setup() {
 
 #ifdef USE_IMU
 
-  Wire.begin();                      // Initialize comunication
-  Wire.beginTransmission(MPU);       // Start communication with MPU6050 // MPU=0x68
-  Wire.write(0x6B);                  // Talk to the register 6B
-  Wire.write(0x00);                  // Make reset - place a 0 into the 6B register
-  Wire.endTransmission(true);   
-
-  mpu.initialize();
-
-  pinMode(INTERRUPT_PIN, INPUT);
-
-  devStatus = mpu.dmpInitialize();
-
-  if (devStatus == 0) {
-    
-      // Calibration Time: generate offsets and calibrate our MPU6050
-      mpu.CalibrateAccel(6);
-      mpu.CalibrateGyro(6);
-      mpu.PrintActiveOffsets();
-
-      // turn on the DMP, now that it's ready
-      mpu.setDMPEnabled(true);
-
-      // enable Arduino interrupt detection
-      attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
-      mpuIntStatus = mpu.getIntStatus();
-
-      // set our DMP Ready flag so the main loop() function knows it's okay to use it
-      dmpReady = true;
-
-    } 
-    else 
-    {
-      // ERROR!
-      // 1 = initial memory load failed
-      // 2 = DMP configuration updates failed
-      // (if it's going to break, usually the code will be 1)
-      Serial.print(F("DMP Initialization failed (code "));
-      Serial.print(devStatus);
-      Serial.println(F(")"));
-    }
+  setup_imu();
 
 #endif
 
@@ -468,34 +429,10 @@ void loop() {
 
 #ifdef USE_IMU
 
-  if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) { // Get the Latest packet 
-      // display quaternion values in easy matrix form: w x y z
-      mpu.dmpGetQuaternion(&q, fifoBuffer);
-      // Serial.print("quat\t");
-      // Serial.print(q.w);
-      // Serial.print("\t");
-      // Serial.print(q.x);
-      // Serial.print("\t");
-      // Serial.print(q.y);
-      // Serial.print("\t");
-      // Serial.println(q.z);
-  }
-
-  Wire.beginTransmission(MPU);
-  Wire.write(0x3B); // Start with register 0x3B (ACCEL_XOUT_H)
-  Wire.endTransmission(false);
-  Wire.requestFrom(MPU, 6, true); // Read 6 registers total, each axis value is stored in 2 registers
-  //For a range of +-2g, we need to divide the raw values by 16384, according to the datasheet
-  AccX = (Wire.read() << 8 | Wire.read()) / 16384.0; // X-axis value
-  AccY = (Wire.read() << 8 | Wire.read()) / 16384.0; // Y-axis value
-  AccZ = (Wire.read() << 8 | Wire.read()) / 16384.0; // Z-axis value
-  Wire.beginTransmission(MPU);
-  Wire.write(0x43); // Gyro data first register address 0x43
-  Wire.endTransmission(false);
-  Wire.requestFrom(MPU, 6, true); // Read 4 registers total, each axis value is stored in 2 registers
-  GyroX = (Wire.read() << 8 | Wire.read()) / 131.0; // For a 250deg/s range we have to divide first the raw value by 131.0, according to the datasheet
-  GyroY = (Wire.read() << 8 | Wire.read()) / 131.0;
-  GyroZ = (Wire.read() << 8 | Wire.read()) / 131.0;
+  // if(mpu_read_ready_flag > 0)
+  // {
+    calc_imu();
+  // }
 #endif
 
 // Sweep servos
