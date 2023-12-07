@@ -74,7 +74,7 @@
 #define INTERRUPT_PIN 18  // use pin 2 on Arduino Uno & most boards
 
 MPU6050 mpu;
-
+uint16_t fifoCount;     // count of all bytes currently in FIFO
 // MPU control/status vars
 bool dmpReady = false;  // set true if DMP init was successful
 uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
@@ -85,6 +85,7 @@ Quaternion q;
 
 int16_t ax, ay, az;
 int16_t gx, gy, gz;
+int16_t iqx, iqy, iqz, iqw;
 
 volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
 void dmpDataReady() {
@@ -144,7 +145,7 @@ void dmpDataReady() {
 #endif
 
 /* Variable initialization */
-
+uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
 // A pair of varibles to help parse serial commands (thanks Fergs)
 int arg = 0;
 int index = 0;
@@ -222,25 +223,43 @@ int runCommand() {
     
   case IMU_READ:
 
-    Serial.print(q.w);
-    Serial.print(" ");
-    Serial.print(q.x);
-    Serial.print(" ");
-    Serial.print(q.y);
-    Serial.print(" ");
-    Serial.print(q.z);
-    Serial.print(" ");
-    Serial.print(ax);
-    Serial.print(" ");
-    Serial.print(ay);
-    Serial.print(" ");
-    Serial.print(az);
-    Serial.print(" ");
-    Serial.print(gx);
-    Serial.print(" ");
-    Serial.print(gy);
-    Serial.print(" ");
-    Serial.println(gz);
+    // Serial.print(Serial.available());
+    // Serial.print(" ");
+    // if(Serial.availableForWrite() > 62)
+    // {
+      // you can print
+      Serial.write((byte*)&iqx, sizeof(iqx));
+      Serial.write((byte*)&iqy, sizeof(iqy));
+      Serial.write((byte*)&iqz, sizeof(iqz));
+      Serial.write((byte*)&iqw, sizeof(iqw));
+      Serial.write((byte*)&ax, sizeof(ax));
+      Serial.write((byte*)&ay, sizeof(ay));
+      Serial.write((byte*)&az, sizeof(az));
+      Serial.write((byte*)&gx, sizeof(gx));
+      Serial.write((byte*)&gy, sizeof(gy));
+      Serial.write((byte*)&gz, sizeof(gz));
+      Serial.println("");
+    // }
+
+    // Serial.print(iqx);
+    // Serial.print(" ");
+    // Serial.print(iqy);
+    // Serial.print(" ");
+    // Serial.print(iqz);
+    // Serial.print(" ");
+    // Serial.print(iqw);
+    // Serial.print(" ");
+    // Serial.print(ax);
+    // Serial.print(" ");
+    // Serial.print(ay);
+    // Serial.print(" ");
+    // Serial.print(az);
+    // Serial.print(" ");
+    // Serial.print(gx);
+    // Serial.print(" ");
+    // Serial.print(gy);
+    // Serial.print(" ");
+    // Serial.println(gz);
   
     break;
 
@@ -317,6 +336,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
   mpuIntStatus = mpu.getIntStatus();
 
+  // Serial.println(F("DMP ready! Waiting for first interrupt..."));
   dmpReady = true;
 
 // Initialize the motor controller if used */
@@ -402,13 +422,56 @@ void loop() {
       }
     }
   }
-  
-  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
   if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) 
   { 
     mpu.dmpGetQuaternion(&q, fifoBuffer);
+
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+    // we want the quaternion values in integer format
+
+    iqx = q.x * 100;
+    iqy = q.y * 100;
+    iqz = q.z * 100;
+    iqw = q.w * 100;
   }
+  // iqx = 121;
+  // iqy = 121;
+  // iqz = 121;
+  // iqw = 121;
+  // ax = -136;
+  // ay = -136;
+  // ay = -136;
+  // gx = 148;
+  // gy = 148;
+  // gz = 148;
+
+  // mpuInterrupt = false;
+  // mpuIntStatus = mpu.getIntStatus();
+
+  // // Check for DMP data ready interrupt (this should happen frequently)
+  // Serial.println("START");
+  // if (mpuIntStatus & 0x02) {   
+
+  //   // wait for correct available data length, should be a VERY short wait    
+  //   while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
+
+  //   // read a packet from FIFO
+  //   mpu.getFIFOBytes(fifoBuffer, packetSize);
+          
+  //   // track FIFO count here in case there is > 1 packet available
+  //   // (this lets us immediately read more without waiting for an interrupt)
+  //   fifoCount -= packetSize;
+  //     // get quaternion values in easy matrix form: w x y z
+  //   mpu.dmpGetQuaternion(&q, fifoBuffer);
+
+  //   iqx = q.x * 100;
+  //   iqy = q.y * 100;
+  //   iqz = q.z * 100;
+  //   iqw = q.w * 100;
+  // }
+  // Serial.println("NOT BLOCKED");
 
 // If we are using base control, run a PID calculation at the appropriate intervals
 #ifdef USE_BASE
