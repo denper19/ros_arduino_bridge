@@ -45,6 +45,8 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  *********************************************************************/
 
+#include <util/atomic.h>
+
 #define USE_BASE      // Enable the base controller code
 //#undef USE_BASE     // Disable the base controller code
 
@@ -66,13 +68,11 @@
    #define L298_MOTOR_DRIVER
 #endif
 
+// #define INTERRUPT_PIN 18  // use pin 2 on Arduino Uno & most boards
 #include "I2Cdev.h"
 
 #include "MPU6050_6Axis_MotionApps20.h" 
 #include "Wire.h"
-
-#define INTERRUPT_PIN 18  // use pin 2 on Arduino Uno & most boards
-
 MPU6050 mpu;
 uint16_t fifoCount;     // count of all bytes currently in FIFO
 // MPU control/status vars
@@ -268,6 +268,24 @@ int runCommand() {
     Serial.print(readEncoder(LEFT));
     Serial.print(" ");
     Serial.println(readEncoder(RIGHT));
+
+    /*
+    int left_count = readEncoder(LEFT);
+    int right_count = readEncoder(RIGHT);
+
+    diffLeft = left_count - prevLeft;
+    prevLeft = left_count;
+
+    diffRight = right_count - prevRight;
+    prevRight = right_count;
+
+    Serial.write((byte*)&diffLeft, sizeof(diffLeft));
+    Serial.write((byte*)&diffRight, sizeof(diffRight));
+
+    Serial.write((byte*)&left_count, sizeof(left_count));
+    Serial.write((byte*)&right_count, sizeof(right_count));
+    */
+
     break;
    case RESET_ENCODERS:
     resetEncoders();
@@ -319,9 +337,10 @@ void setup() {
 
   Wire.begin();
   Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
+  Wire.setWireTimeout(10000, true);
 
   mpu.initialize();
-  pinMode(INTERRUPT_PIN, INPUT);
+  // pinMode(INTERRUPT_PIN, INPUT);
 
   devStatus = mpu.dmpInitialize();
 
@@ -333,11 +352,25 @@ void setup() {
 
   mpu.setDMPEnabled(true);
 
-  attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
+  // attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
   mpuIntStatus = mpu.getIntStatus();
+
+  packetSize = mpu.dmpGetFIFOPacketSize();
 
   // Serial.println(F("DMP ready! Waiting for first interrupt..."));
   dmpReady = true;
+
+#ifdef MPU9250
+  imu.Config(&Wire, bfs::Mpu9250::I2C_ADDR_PRIM);
+  if (!imu.Begin()) {
+    Serial.println("Error initializing communication with IMU");
+    while(1) {}
+  }
+  if (!imu.ConfigSrd(19)) {
+    Serial.println("Error configured SRD");
+    while(1) {}
+  }
+#endif
 
 // Initialize the motor controller if used */
 #ifdef USE_BASE
@@ -423,19 +456,28 @@ void loop() {
     }
   }
 
-  if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) 
-  { 
-    mpu.dmpGetQuaternion(&q, fifoBuffer);
+  GetCurrentFIFOPacket(fifoBuffer, packetSize, 3);
+  
+  mpu.dmpGetQuaternion(&q, fifoBuffer);
 
-    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+  iqx = q.x * 100;
+  iqy = q.y * 100;
+  iqz = q.z * 100;
+  iqw = q.w * 100;
 
-    // we want the quaternion values in integer format
+  // if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) 
+  // { 
+  //   mpu.dmpGetQuaternion(&q, fifoBuffer);
 
-    iqx = q.x * 100;
-    iqy = q.y * 100;
-    iqz = q.z * 100;
-    iqw = q.w * 100;
-  }
+  //   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+  //   // we want the quaternion values in integer format
+
+  //   iqx = q.x * 100;
+  //   iqy = q.y * 100;
+  //   iqz = q.z * 100;
+  //   iqw = q.w * 100;
+  // }
   // iqx = 121;
   // iqy = 121;
   // iqz = 121;
@@ -496,3 +538,38 @@ void loop() {
 #endif
 }
 
+uint8_t GetCurrentFIFOPacket(uint8_t* data, uint8_t length, uint8_t max_loops)
+{
+  fifoCount = mpu.getFIFOCount();
+  int GetPacketLoop = 0;
+  int OuterPacketLoop = 0;
+  if(fifoCount != length && OuterPacketLoop <= 3)
+  {
+    mpu.resetFIFO();
+    delay(1);
+
+    fifoCount = mpu.getFIFOCount();
+    GetPacketLoop = 0;
+
+    while (fifoCount < length && GetPacketLoop < max_loops)
+    {
+      fifoCount = mpu.getFIFOCount();
+      GetPacketLoop++;
+    }
+
+    if(GetPacketLoop >= max_loops)
+    {
+      return 0;
+    }
+
+    OuterPacketLoop++;
+  }
+
+  if(OuterPacketLoop < 3)
+  {
+    mpu.getFIFOBytes(data, length);
+    return 1;
+  }
+
+  return 0;
+}
